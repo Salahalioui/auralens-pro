@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, Key, Trash2, Zap, Sparkles, Sliders, Info } from 'lucide-react';
+import { Camera, Key, Trash2, Zap, Sparkles, Sliders, Info, Smartphone } from 'lucide-react';
 import { geminiService } from '../services/geminiService';
 import { clearAnalysisCache } from '../services/cacheService';
 
@@ -103,6 +103,20 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           
+          {/* PWA Install Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.removeItem('auralens_pwa_dismissed');
+              window.dispatchEvent(new CustomEvent('open-pwa-install'));
+            }}
+            title="Install AuraLens Pro App"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-accent-gold bg-slate-900/80 hover:bg-slate-800 border border-slate-800/80 transition-all cursor-pointer shadow-sm"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-accent-gold" />
+            <span className="hidden xl:inline">Install App</span>
+          </button>
+
           {/* About Modal Trigger */}
           <button
             type="button"

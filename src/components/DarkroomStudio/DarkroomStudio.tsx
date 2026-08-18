@@ -451,7 +451,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
         <div className="lg:col-span-5 space-y-4">
           
           {/* Sub-Tab Navigation Bar */}
-          <div className="flex items-center bg-darkroom-900 border border-slate-800 rounded-xl p-1 gap-1 text-xs">
+          <div className="flex items-center bg-darkroom-900 border border-slate-800 rounded-xl p-1 gap-1 text-xs overflow-x-auto scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveControlTab('tone')}

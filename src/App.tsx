@@ -14,6 +14,7 @@ import { MasterworkViewer } from './components/GenerationStage/MasterworkViewer'
 import { RetryStudio } from './components/GenerationStage/RetryStudio';
 import { ExportModal } from './components/GenerationStage/ExportModal';
 import { AboutModal } from './components/AboutModal';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 
 import { 
   FullAnalysisResult, 
@@ -430,11 +431,14 @@ export const App: React.FC = () => {
       )}
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 py-6 mb-16 md:mb-0 text-center text-xs text-slate-500 font-mono">
+      <footer className="border-t border-slate-800/80 py-6 mb-20 md:mb-0 text-center text-xs text-slate-500 font-mono">
         <p>
           AuraLens Pro • Built with Google Gemini Vision & Nano Banana Computational Photography Architecture
         </p>
       </footer>
+
+      {/* PWA App Install Banner & iOS Safari Guide */}
+      <PwaInstallPrompt />
 
     </div>
   );
