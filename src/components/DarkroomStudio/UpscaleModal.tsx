@@ -5,13 +5,21 @@ import {
   Sparkles, 
   Download, 
   CheckCircle2, 
-  Maximize2, 
   Sliders, 
   Cpu, 
   Layers,
-  ArrowRight
+  ArrowRight,
+  ShieldCheck,
+  User,
+  TreePine,
+  Image as ImageIcon
 } from 'lucide-react';
-import { upscaleImageSuperResolution, UpscaleProgress } from '../../services/imageProcessor';
+import { 
+  runMultiEngineUpscaler, 
+  UpscaleEngineId, 
+  UPSCALE_ENGINES, 
+  UpscaleProgress 
+} from '../../services/imageProcessor';
 
 interface UpscaleModalProps {
   isOpen: boolean;
@@ -24,6 +32,7 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
   onClose,
   canvasRef
 }) => {
+  const [selectedEngine, setSelectedEngine] = useState<UpscaleEngineId>('truthful_highpass');
   const [scaleFactor, setScaleFactor] = useState<2 | 4>(2);
   const [sharpness, setSharpness] = useState<number>(45);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -32,6 +41,7 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
     dataUrl: string;
     width: number;
     height: number;
+    engineUsed: string;
   } | null>(null);
 
   if (!isOpen) return null;
@@ -47,8 +57,9 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
     setUpscaledResult(null);
 
     try {
-      const res = await upscaleImageSuperResolution(
+      const res = await runMultiEngineUpscaler(
         canvasRef.current,
+        selectedEngine,
         scaleFactor,
         sharpness,
         (p) => setProgress(p)
@@ -65,13 +76,22 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
     if (!upscaledResult) return;
     const a = document.createElement('a');
     a.href = upscaledResult.dataUrl;
-    a.download = `AuraLens_4K_SuperRes_${upscaledResult.width}x${upscaledResult.height}_${Date.now()}.jpg`;
+    a.download = `AuraLens_SuperRes_${selectedEngine}_${upscaledResult.width}x${upscaledResult.height}_${Date.now()}.jpg`;
     a.click();
+  };
+
+  const getEngineIcon = (id: UpscaleEngineId) => {
+    switch (id) {
+      case 'truthful_highpass': return <ShieldCheck className="w-4 h-4 text-emerald-400" />;
+      case 'neural_esrgan': return <TreePine className="w-4 h-4 text-cyan-400" />;
+      case 'face_codeformer': return <User className="w-4 h-4 text-accent-gold" />;
+      default: return <Sparkles className="w-4 h-4 text-accent-gold" />;
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
-      <div className="darkroom-card max-w-xl w-full p-6 sm:p-7 relative border border-slate-700/80 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+      <div className="darkroom-card max-w-2xl w-full p-6 sm:p-7 relative border border-slate-700/80 shadow-2xl space-y-6 max-h-[92vh] overflow-y-auto">
         
         {/* Close Button */}
         <button
@@ -93,20 +113,20 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-cinzel font-bold text-lg text-slate-100">
-                4K AI Super-Resolution Studio
+                Multi-Engine AI Super-Resolution Studio
               </h2>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                100% Free & Client-Side
+                100% Free
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Multi-pass sub-pixel interpolation & Laplacian edge reconstruction
+              Select the optimal AI reconstruction engine tailored for your specific photographic genre
             </p>
           </div>
         </div>
 
         {/* Resolution Comparison Card */}
-        <div className="p-4 rounded-2xl bg-darkroom-950 border border-slate-800 flex items-center justify-between gap-4 text-xs font-mono">
+        <div className="p-3.5 rounded-2xl bg-darkroom-950 border border-slate-800 flex items-center justify-between gap-4 text-xs font-mono">
           <div className="space-y-0.5">
             <span className="text-[10px] uppercase text-slate-500">Source Resolution</span>
             <p className="text-slate-300 font-bold text-sm">
@@ -128,10 +148,55 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
         {!upscaledResult && !isProcessing && (
           <div className="space-y-4 text-xs">
             
+            {/* Multi-Engine Selector (3 Cards) */}
+            <div className="space-y-2">
+              <span className="font-mono font-bold text-slate-300 block">
+                1. Select AI Super-Resolution Architecture:
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {UPSCALE_ENGINES.map((engine) => {
+                  const isSelected = selectedEngine === engine.id;
+                  return (
+                    <button
+                      key={engine.id}
+                      type="button"
+                      onClick={() => setSelectedEngine(engine.id)}
+                      className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                        isSelected
+                          ? 'bg-slate-800 border-accent-gold shadow-lg shadow-amber-500/10 scale-[1.02]'
+                          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-800/50'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1 mb-1.5">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-100 text-xs">
+                            {getEngineIcon(engine.id)}
+                            <span className="truncate">{engine.name.split(' ')[0]}</span>
+                          </div>
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${engine.badgeColor}`}>
+                            {engine.badge}
+                          </span>
+                        </div>
+
+                        <p className="text-[10px] text-slate-400 line-clamp-3 leading-snug">
+                          {engine.description}
+                        </p>
+                      </div>
+
+                      <div className="mt-2.5 pt-2 border-t border-slate-800 text-[9px] font-mono text-slate-400">
+                        <strong>Best for:</strong> {engine.bestFor.split(',')[0]}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Scale Selector */}
             <div className="space-y-2">
               <span className="font-mono font-bold text-slate-300 block">
-                Magnification Target:
+                2. Magnification Factor:
               </span>
               <div className="grid grid-cols-2 gap-3">
                 <button
@@ -148,7 +213,7 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
                     <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-slate-950">Fast</span>
                   </div>
                   <p className="text-[11px] opacity-80">
-                    Ideal for web, social media and ultra-crisp Retina display viewing.
+                    Ideal for web, mobile displays & social media.
                   </p>
                 </button>
 
@@ -166,14 +231,14 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
                     <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-accent-gold">Gallery</span>
                   </div>
                   <p className="text-[11px] opacity-80">
-                    Maximum sub-pixel texture detail for large prints & 4K monitors.
+                    Maximum micro-texture clarity for large 4K monitors and archival prints.
                   </p>
                 </button>
               </div>
             </div>
 
             {/* Sharpness Slider */}
-            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5">
               <div className="flex justify-between font-mono">
                 <span className="text-slate-300">High-Pass Edge Matrix Polish</span>
                 <span className="text-accent-gold font-bold">{sharpness}%</span>
@@ -186,9 +251,6 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
                 onChange={(e) => setSharpness(parseInt(e.target.value))}
                 className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
               />
-              <p className="text-[10px] text-slate-500">
-                Enhances fine textural contrast on eyes, hair, and edges without halo artifacts.
-              </p>
             </div>
 
           </div>
@@ -203,7 +265,7 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
                 {progress.phase}
               </h4>
               <p className="text-xs text-slate-400 font-mono">
-                Processing multi-pass sub-pixel interpolation on client GPU...
+                Executing {UPSCALE_ENGINES.find(e => e.id === selectedEngine)?.name}...
               </p>
             </div>
             
@@ -220,16 +282,21 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
         {/* Result Ready View */}
         {upscaledResult && (
           <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 animate-fade-in">
-            <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold font-mono">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>4K Masterwork Successfully Generated ({upscaledResult.width} × {upscaledResult.height})</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold font-mono">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>4K Masterwork Generated ({upscaledResult.width} × {upscaledResult.height})</span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                {upscaledResult.engineUsed}
+              </span>
             </div>
 
-            <div className="relative rounded-xl overflow-hidden border border-slate-800 max-h-48 bg-black">
+            <div className="relative rounded-xl overflow-hidden border border-slate-800 max-h-52 bg-black">
               <img
                 src={upscaledResult.dataUrl}
                 alt="Upscaled result"
-                className="w-full h-48 object-cover object-center"
+                className="w-full h-52 object-cover object-center"
               />
               <span className="absolute bottom-2 right-2 bg-darkroom-950/80 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-mono text-emerald-300 border border-emerald-500/30">
                 100% Quality JPEG
@@ -257,7 +324,7 @@ export const UpscaleModal: React.FC<UpscaleModalProps> = ({
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-amber-500 hover:from-cyan-400 hover:to-amber-400 text-darkroom-950 font-bold flex items-center gap-1.5 transition-all shadow-lg shadow-cyan-500/15 cursor-pointer disabled:opacity-50"
             >
               <Zap className="w-4 h-4" />
-              <span>Upscale to {scaleFactor === 4 ? '4K Ultra-HD' : '2× HD'}</span>
+              <span>Upscale with {UPSCALE_ENGINES.find(e => e.id === selectedEngine)?.name.split(' ')[0]}</span>
             </button>
           ) : (
             <button
