@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <radialGradient id="apertureGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#080a0f" stop-opacity="1" />
+    </radialGradient>
+  </defs>
+  <circle cx="50" cy="50" r="46" fill="#0d1117" stroke="url(#lensGrad)" stroke-width="4" />
+  <circle cx="50" cy="50" r="32" fill="url(#apertureGlow)" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,4" />
+  <!-- Aperture Blades -->
+  <polygon points="50,22 62,38 48,34" fill="#f59e0b" opacity="0.9" />
+  <polygon points="68,36 68,54 56,46" fill="#eab308" opacity="0.9" />
+  <polygon points="68,64 50,68 56,54" fill="#06b6d4" opacity="0.9" />
+  <polygon points="50,78 38,62 52,66" fill="#06b6d4" opacity="0.9" />
+  <polygon points="32,64 32,46 44,54" fill="#eab308" opacity="0.9" />
+  <polygon points="32,36 50,32 44,46" fill="#f59e0b" opacity="0.9" />
+  <circle cx="50" cy="50" r="8" fill="#ffffff" opacity="0.95" />
+  <!-- Camera sparkle -->
+  <polygon points="76,20 79,26 85,29 79,32 76,38 73,32 67,29 73,26" fill="#eab308" />
+</svg>

@@ -1,0 +1,574 @@
+import { 
+  NumericalGrading, 
+  PhotoMetadata, 
+  SuggestedCrop, 
+  SplitToningSettings, 
+  HistogramData 
+} from '../types/photography';
+
+export interface PreprocessedImageResult {
+  base64Raw: string;
+  dataUrl: string;
+  mimeType: string;
+  metadata: PhotoMetadata;
+}
+
+/**
+ * Downscales uploaded image to max dimension to optimize memory, tokens, and Canvas throughput
+ */
+export async function preprocessImage(file: File, maxDim = 1280): Promise<PreprocessedImageResult> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const origWidth = img.width;
+        const origHeight = img.height;
+
+        let targetWidth = origWidth;
+        let targetHeight = origHeight;
+
+        if (origWidth > maxDim || origHeight > maxDim) {
+          if (origWidth > origHeight) {
+            targetWidth = maxDim;
+            targetHeight = Math.round((origHeight * maxDim) / origWidth);
+          } else {
+            targetHeight = maxDim;
+            targetWidth = Math.round((origWidth * maxDim) / origHeight);
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas 2D context unavailable'));
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+        const mimeType = 'image/jpeg';
+        const resizedDataUrl = canvas.toDataURL(mimeType, 0.92);
+        const base64Raw = resizedDataUrl.split(',')[1];
+
+        const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+        const divisor = gcd(origWidth, origHeight);
+        const simpleRatio = `${Math.round(origWidth / divisor)}:${Math.round(origHeight / divisor)}`;
+
+        const metadata: PhotoMetadata = {
+          fileName: file.name,
+          fileSize: file.size,
+          width: origWidth,
+          height: origHeight,
+          aspectRatio: simpleRatio.length > 7 ? `${(origWidth / origHeight).toFixed(2)}:1` : simpleRatio,
+          mimeType: file.type || 'image/jpeg',
+          hasExif: false,
+          exifData: {
+            camera: 'Digital Sensor / Mobile Camera',
+            focalLength: '35mm eq.',
+            aperture: 'f/2.8 auto',
+            shutterSpeed: '1/120s',
+            iso: 'ISO 200',
+            dateTime: new Date(file.lastModified).toLocaleDateString()
+          }
+        };
+
+        resolve({
+          base64Raw,
+          dataUrl: resizedDataUrl,
+          mimeType,
+          metadata
+        });
+      };
+      img.onerror = () => reject(new Error('Failed to decode image file'));
+      img.src = dataUrl;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function preprocessImageUrl(url: string, name = 'sample.jpg'): Promise<PreprocessedImageResult> {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
+  return preprocessImage(file);
+}
+
+/**
+ * Converts HSL hue (0-360) and sat (0-1) to RGB delta multipliers
+ */
+function hslToRgbDelta(hue: number, sat: number): { r: number; g: number; b: number } {
+  const h = (hue % 360) / 60;
+  const c = sat;
+  const x = c * (1 - Math.abs((h % 2) - 1));
+
+  let r = 0, g = 0, b = 0;
+  if (h >= 0 && h < 1) { r = c; g = x; b = 0; }
+  else if (h >= 1 && h < 2) { r = x; g = c; b = 0; }
+  else if (h >= 2 && h < 3) { r = 0; g = c; b = x; }
+  else if (h >= 3 && h < 4) { r = 0; g = x; b = c; }
+  else if (h >= 4 && h < 5) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+
+  // Convert to zero-centered delta (-1 to +1)
+  return {
+    r: (r - 0.5 * sat) * 255,
+    g: (g - 0.5 * sat) * 255,
+    b: (b - 0.5 * sat) * 255
+  };
+}
+
+/**
+ * Studio-Grade Computational Color Science Engine
+ */
+export function applyDarkroomGrading(
+  canvas: HTMLCanvasElement,
+  imageElement: HTMLImageElement,
+  grading: NumericalGrading,
+  crop?: SuggestedCrop | null,
+  splitToning?: SplitToningSettings | null,
+  halation = 0,
+  sCurveRollOff = 40
+): void {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const srcWidth = imageElement.naturalWidth || imageElement.width;
+  const srcHeight = imageElement.naturalHeight || imageElement.height;
+
+  // Calculate crop coordinates
+  let sx = 0;
+  let sy = 0;
+  let sWidth = srcWidth;
+  let sHeight = srcHeight;
+
+  if (crop && crop.xmin !== undefined && crop.xmax !== undefined) {
+    const xmin = Number(crop.xmin) || 0;
+    const ymin = Number(crop.ymin) || 0;
+    const xmax = Number(crop.xmax) || 1000;
+    const ymax = Number(crop.ymax) || 1000;
+
+    sx = Math.max(0, (xmin / 1000) * srcWidth);
+    sy = Math.max(0, (ymin / 1000) * srcHeight);
+    sWidth = Math.min(srcWidth - sx, ((xmax - xmin) / 1000) * srcWidth);
+    sHeight = Math.min(srcHeight - sy, ((ymax - ymin) / 1000) * srcHeight);
+  }
+
+  canvas.width = Math.max(10, Math.round(sWidth));
+  canvas.height = Math.max(10, Math.round(sHeight));
+
+  // Draw base cropped image
+  ctx.drawImage(imageElement, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+
+  // Get pixel buffer
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+  const len = data.length;
+
+  // 1. Exposure Multiplier (EV)
+  const evMult = Math.pow(2, (grading.exposureEV || 0) * 0.85);
+
+  // 2. Contrast Multiplier
+  const contrastVal = grading.contrast || 0;
+  const contrastFactor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
+
+  // 3. White Balance Temperature & Tint
+  const tempShiftR = ((grading.temperature || 0) / 100) * 32;
+  const tempShiftB = -((grading.temperature || 0) / 100) * 32;
+  const tintShiftG = -((grading.tint || 0) / 100) * 22;
+  const tintShiftR = ((grading.tint || 0) / 100) * 14;
+  const tintShiftB = ((grading.tint || 0) / 100) * 14;
+
+  // 4. Saturation & Vibrance
+  const isMonochrome = grading.saturation <= -98;
+  const satMult = isMonochrome ? 0 : 1 + ((grading.saturation || 0) / 100);
+  const vibMult = isMonochrome ? 0 : ((grading.vibrance || 0) / 100) * 0.85;
+
+  // 5. Highlights, Shadows, Whites, Blacks
+  const highlightAdj = (grading.highlights || 0) / 100;
+  const shadowAdj = (grading.shadows || 0) / 100;
+  const whitesAdj = ((grading.whites || 0) / 100) * 25;
+  const blacksAdj = ((grading.blacks || 0) / 100) * 25;
+
+  // 6. Split Toning Deltas
+  const hasSplitToning = splitToning && (splitToning.shadowsSat > 0 || splitToning.highlightsSat > 0);
+  const shadowToning = hasSplitToning
+    ? hslToRgbDelta(splitToning.shadowsHue, splitToning.shadowsSat / 100)
+    : { r: 0, g: 0, b: 0 };
+  const highlightToning = hasSplitToning
+    ? hslToRgbDelta(splitToning.highlightsHue, splitToning.highlightsSat / 100)
+    : { r: 0, g: 0, b: 0 };
+
+  const splitBalance = splitToning?.balance ? splitToning.balance / 100 : 0;
+  const splitMidpoint = 128 + splitBalance * 40;
+
+  // 7. S-Curve Roll-off Factor (0 to 1)
+  const rollOffStrength = (sCurveRollOff / 100) * 0.6;
+
+  // Pixel transformation loop
+  for (let i = 0; i < len; i += 4) {
+    let r = data[i];
+    let g = data[i + 1];
+    let b = data[i + 2];
+
+    // --- Exposure ---
+    r *= evMult;
+    g *= evMult;
+    b *= evMult;
+
+    // --- Whites & Blacks Anchor ---
+    if (whitesAdj !== 0) {
+      r += whitesAdj * (r / 255);
+      g += whitesAdj * (g / 255);
+      b += whitesAdj * (b / 255);
+    }
+    if (blacksAdj !== 0) {
+      const bWeight = Math.max(0, (128 - (0.3 * r + 0.59 * g + 0.11 * b)) / 128);
+      r += blacksAdj * bWeight;
+      g += blacksAdj * bWeight;
+      b += blacksAdj * bWeight;
+    }
+
+    // --- Dynamic Range (Shadow Lift & Highlight Compression) ---
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    if (lum < 128) {
+      const shadowWeight = (128 - lum) / 128;
+      const boost = shadowAdj * shadowWeight * 48;
+      r += boost;
+      g += boost;
+      b += boost;
+    } else {
+      const highlightWeight = (lum - 128) / 128;
+      const comp = highlightAdj * highlightWeight * 48;
+      r += comp;
+      g += comp;
+      b += comp;
+    }
+
+    // --- Parametric S-Curve Tone Mapping (Highlight Roll-off) ---
+    if (rollOffStrength > 0) {
+      // Soft compressive roll-off curve
+      const normR = Math.max(0, Math.min(1, r / 255));
+      const normG = Math.max(0, Math.min(1, g / 255));
+      const normB = Math.max(0, Math.min(1, b / 255));
+
+      // Cubic hermite smooth roll-off
+      const sCurve = (t: number) => t * t * (3 - 2 * t);
+      r = (normR * (1 - rollOffStrength) + sCurve(normR) * rollOffStrength) * 255;
+      g = (normG * (1 - rollOffStrength) + sCurve(normG) * rollOffStrength) * 255;
+      b = (normB * (1 - rollOffStrength) + sCurve(normB) * rollOffStrength) * 255;
+    }
+
+    // --- Contrast ---
+    if (contrastVal !== 0) {
+      r = contrastFactor * (r - 128) + 128;
+      g = contrastFactor * (g - 128) + 128;
+      b = contrastFactor * (b - 128) + 128;
+    }
+
+    // --- White Balance Temperature & Tint ---
+    r += tempShiftR + tintShiftR;
+    g += tintShiftG;
+    b += tempShiftB + tintShiftB;
+
+    // --- Split Toning (Lift, Gamma, Gain) ---
+    if (hasSplitToning) {
+      const curLuma = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (curLuma < splitMidpoint) {
+        const shadowFac = (splitMidpoint - curLuma) / splitMidpoint;
+        r += shadowToning.r * shadowFac * 0.4;
+        g += shadowToning.g * shadowFac * 0.4;
+        b += shadowToning.b * shadowFac * 0.4;
+      } else {
+        const highFac = (curLuma - splitMidpoint) / (255 - splitMidpoint);
+        r += highlightToning.r * highFac * 0.4;
+        g += highlightToning.g * highFac * 0.4;
+        b += highlightToning.b * highFac * 0.4;
+      }
+    }
+
+    // --- Saturation / Vibrance / Monochrome ---
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (isMonochrome) {
+      r = gray;
+      g = gray;
+      b = gray;
+    } else {
+      const maxChannel = Math.max(r, Math.max(g, b));
+      const currentSat = (maxChannel - Math.min(r, Math.min(g, b))) / 255;
+      const totalSatMult = satMult + (1 - currentSat) * vibMult;
+
+      r = gray + (r - gray) * totalSatMult;
+      g = gray + (g - gray) * totalSatMult;
+      b = gray + (b - gray) * totalSatMult;
+    }
+
+    // Clamp values
+    data[i] = Math.max(0, Math.min(255, r));
+    data[i + 1] = Math.max(0, Math.min(255, g));
+    data[i + 2] = Math.max(0, Math.min(255, b));
+  }
+
+  // Put base graded pixels back
+  ctx.putImageData(imgData, 0, 0);
+
+  // --- Photochemical Halation & Specular Bloom Simulation ---
+  if (halation > 0) {
+    const halationCanvas = document.createElement('canvas');
+    halationCanvas.width = canvas.width;
+    halationCanvas.height = canvas.height;
+    const hCtx = halationCanvas.getContext('2d');
+
+    if (hCtx) {
+      // Extract specular highlight mask
+      const hImgData = hCtx.createImageData(canvas.width, canvas.height);
+      const hData = hImgData.data;
+      const threshold = 185;
+      const halationIntensity = (halation / 100) * 0.75;
+
+      for (let k = 0; k < len; k += 4) {
+        const l = 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+        if (l > threshold) {
+          const factor = (l - threshold) / (255 - threshold);
+          hData[k] = 255 * factor;     // Warm Red halation wavelength
+          hData[k + 1] = 60 * factor;  // Slight orange
+          hData[k + 2] = 20 * factor;  // Low blue
+          hData[k + 3] = 255 * factor * halationIntensity;
+        }
+      }
+      hCtx.putImageData(hImgData, 0, 0);
+
+      // Blur the halation mask for photochemical light bleeding
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.filter = `blur(${Math.max(4, Math.round(canvas.width * 0.012))}px)`;
+      ctx.drawImage(halationCanvas, 0, 0);
+      ctx.restore();
+    }
+  }
+
+  // --- Vignette Overlay ---
+  if (grading.vignette && grading.vignette > 0) {
+    const radius = Math.sqrt(Math.pow(canvas.width / 2, 2) + Math.pow(canvas.height / 2, 2));
+    const vignetteGrad = ctx.createRadialGradient(
+      canvas.width / 2, canvas.height / 2, radius * 0.42,
+      canvas.width / 2, canvas.height / 2, radius
+    );
+    const vignetteOpacity = (grading.vignette / 100) * 0.72;
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, `rgba(0,0,0,${vignetteOpacity})`);
+
+    ctx.fillStyle = vignetteGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // --- Luminance-Adaptive Film Grain ---
+  if (grading.grain && grading.grain > 0) {
+    const grainCanvas = document.createElement('canvas');
+    grainCanvas.width = canvas.width;
+    grainCanvas.height = canvas.height;
+    const grainCtx = grainCanvas.getContext('2d');
+
+    if (grainCtx) {
+      const grainImgData = grainCtx.createImageData(canvas.width, canvas.height);
+      const grainData = grainImgData.data;
+      const grainAmount = (grading.grain / 100) * 40;
+
+      for (let j = 0; j < grainData.length; j += 4) {
+        // Luminance-weighted bell curve: grain is thickest in Zone V midtones
+        const baseLuma = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
+        const midtoneWeight = Math.max(0.2, 1 - Math.abs(baseLuma - 128) / 128);
+
+        const noise = (Math.random() - 0.5) * grainAmount * midtoneWeight;
+        grainData[j] = 128 + noise;
+        grainData[j + 1] = 128 + noise;
+        grainData[j + 2] = 128 + noise;
+        grainData[j + 3] = Math.abs(noise) * 4.2;
+      }
+      grainCtx.putImageData(grainImgData, 0, 0);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.drawImage(grainCanvas, 0, 0);
+      ctx.restore();
+    }
+  }
+}
+
+/**
+ * Computes live 256-bucket RGB and Luminance Histogram data from a canvas
+ */
+export function computeHistogram(canvas: HTMLCanvasElement): HistogramData {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const empty: HistogramData = {
+    r: new Array(256).fill(0),
+    g: new Array(256).fill(0),
+    b: new Array(256).fill(0),
+    luma: new Array(256).fill(0),
+    clippedShadowsPercent: 0,
+    clippedHighlightsPercent: 0
+  };
+
+  if (!ctx || canvas.width === 0 || canvas.height === 0) return empty;
+
+  try {
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+    const totalPixels = data.length / 4;
+
+    const r = new Array(256).fill(0);
+    const g = new Array(256).fill(0);
+    const b = new Array(256).fill(0);
+    const luma = new Array(256).fill(0);
+
+    let shadowClip = 0;
+    let highlightClip = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const red = data[i];
+      const green = data[i + 1];
+      const blue = data[i + 2];
+      const lum = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+
+      r[red]++;
+      g[green]++;
+      b[blue]++;
+      luma[lum]++;
+
+      if (lum <= 2) shadowClip++;
+      if (lum >= 253) highlightClip++;
+    }
+
+    return {
+      r,
+      g,
+      b,
+      luma,
+      clippedShadowsPercent: Number(((shadowClip / totalPixels) * 100).toFixed(1)),
+      clippedHighlightsPercent: Number(((highlightClip / totalPixels) * 100).toFixed(1))
+    };
+  } catch (err) {
+    console.warn('Failed to compute histogram:', err);
+    return empty;
+  }
+}
+
+/**
+ * Generates an Industry-Standard 3D LUT (.CUBE) format (33x33x33) for Premiere Pro, DaVinci Resolve, Photoshop
+ */
+export function generate3DCubeLUT(
+  grading: NumericalGrading,
+  splitToning?: SplitToningSettings | null,
+  sCurveRollOff = 40,
+  lutSize = 33
+): string {
+  const lines: string[] = [];
+  lines.push('# AuraLens Pro — AI Studio 3D LUT');
+  lines.push(`# Generated with Gemini Vision Color Science Matrix`);
+  lines.push(`TITLE "AuraLens_AI_MasterGrade"`);
+  lines.push(`LUT_3D_SIZE ${lutSize}`);
+  lines.push(`DOMAIN_MIN 0.0 0.0 0.0`);
+  lines.push(`DOMAIN_MAX 1.0 1.0 1.0`);
+  lines.push('');
+
+  const evMult = Math.pow(2, (grading.exposureEV || 0) * 0.85);
+  const contrastVal = grading.contrast || 0;
+  const contrastFactor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
+  const tempShiftR = (((grading.temperature || 0) / 100) * 32) / 255;
+  const tempShiftB = -(((grading.temperature || 0) / 100) * 32) / 255;
+  const tintShiftG = -(((grading.tint || 0) / 100) * 22) / 255;
+  const isMonochrome = grading.saturation <= -98;
+  const satMult = isMonochrome ? 0 : 1 + ((grading.saturation || 0) / 100);
+  const rollOffStrength = (sCurveRollOff / 100) * 0.6;
+  const sCurve = (t: number) => t * t * (3 - 2 * t);
+
+  // Iterate 3D color cube (Blue outer, Green mid, Red inner)
+  for (let bIdx = 0; bIdx < lutSize; bIdx++) {
+    for (let gIdx = 0; gIdx < lutSize; gIdx++) {
+      for (let rIdx = 0; rIdx < lutSize; rIdx++) {
+        let r = rIdx / (lutSize - 1);
+        let g = gIdx / (lutSize - 1);
+        let b = bIdx / (lutSize - 1);
+
+        // Exposure
+        r *= evMult;
+        g *= evMult;
+        b *= evMult;
+
+        // Dynamic Range Highlights & Shadows
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (lum < 0.5) {
+          const sWeight = (0.5 - lum) / 0.5;
+          const boost = ((grading.shadows || 0) / 100) * sWeight * 0.18;
+          r += boost; g += boost; b += boost;
+        } else {
+          const hWeight = (lum - 0.5) / 0.5;
+          const comp = ((grading.highlights || 0) / 100) * hWeight * 0.18;
+          r += comp; g += comp; b += comp;
+        }
+
+        // S-Curve roll-off
+        if (rollOffStrength > 0) {
+          const nR = Math.max(0, Math.min(1, r));
+          const nG = Math.max(0, Math.min(1, g));
+          const nB = Math.max(0, Math.min(1, b));
+          r = nR * (1 - rollOffStrength) + sCurve(nR) * rollOffStrength;
+          g = nG * (1 - rollOffStrength) + sCurve(nG) * rollOffStrength;
+          b = nB * (1 - rollOffStrength) + sCurve(nB) * rollOffStrength;
+        }
+
+        // Contrast
+        if (contrastVal !== 0) {
+          r = (contrastFactor * (r * 255 - 128) + 128) / 255;
+          g = (contrastFactor * (g * 255 - 128) + 128) / 255;
+          b = (contrastFactor * (b * 255 - 128) + 128) / 255;
+        }
+
+        // Temperature & Tint
+        r += tempShiftR;
+        g += tintShiftG;
+        b += tempShiftB;
+
+        // Saturation / Monochrome
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (isMonochrome) {
+          r = gray; g = gray; b = gray;
+        } else {
+          r = gray + (r - gray) * satMult;
+          g = gray + (g - gray) * satMult;
+          b = gray + (b - gray) * satMult;
+        }
+
+        // Clamp 0.0 to 1.0 with 6 decimal precision
+        const outR = Math.max(0, Math.min(1, r)).toFixed(6);
+        const outG = Math.max(0, Math.min(1, g)).toFixed(6);
+        const outB = Math.max(0, Math.min(1, b)).toFixed(6);
+
+        lines.push(`${outR} ${outG} ${outB}`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Exports a CSS filter representation of the grading parameters
+ */
+export function generateCssFilter(grading: NumericalGrading): string {
+  const brightness = (1 + (grading.exposureEV || 0) * 0.3).toFixed(2);
+  const contrast = (1 + (grading.contrast || 0) / 100 * 0.6).toFixed(2);
+  const isMonochrome = grading.saturation <= -98;
+  const saturate = isMonochrome ? '0' : (1 + (grading.saturation || 0) / 100 * 0.8).toFixed(2);
+  const sepia = (Math.max(0, grading.temperature || 0) / 100 * 0.3).toFixed(2);
+  const hueRotate = `${((grading.tint || 0) * 0.5).toFixed(0)}deg`;
+
+  return `brightness(${brightness}) contrast(${contrast}) saturate(${saturate}) sepia(${sepia}) hue-rotate(${hueRotate})`;
+}
