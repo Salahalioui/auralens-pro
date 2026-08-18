@@ -1,6 +1,6 @@
 # AuraLens Pro — Architectural Specification
 
-AuraLens Pro is a Progressive Web Application (PWA) that combines Google Gemini's multimodal vision reasoning with in-browser computational photography and Nano Banana generative image synthesis.
+AuraLens Pro is a Progressive Web Application (PWA) that combines Google Gemini's multimodal vision reasoning with in-browser computational photography, multi-engine 4K AI super-resolution, and Nano Banana generative image synthesis.
 
 ---
 
@@ -9,7 +9,7 @@ AuraLens Pro is a Progressive Web Application (PWA) that combines Google Gemini'
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              AuraLens Pro UI                                │
-│        (React 19 + TypeScript + Tailwind CSS + Lucide Icons + PWA)          │
+│    (React 19 + TypeScript + Tailwind CSS + Lucide Icons + Mobile PWA)       │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
             ┌──────────────────────────┴──────────────────────────┐
@@ -19,16 +19,21 @@ AuraLens Pro is a Progressive Web Application (PWA) that combines Google Gemini'
 │ (Google Gemini 3.6 / 3.7)     │             │  (Canvas 2D / Photochemical)  │
 ├───────────────────────────────┤             ├───────────────────────────────┤
 │ • Phase 1: Spatial Geometry   │             │ • 6 AI Tailored Recipes       │
-│ • Phase 2: Mood & Intent      │             │ • Photochemical Halation      │
-│ • Phase 3: Color Science      │             │ • S-Curve Tone Mapping        │
-│ • Phase 4: Master Synthesis   │             │ • 3-Way Split Toning Wheels   │
-│ • Phase 5: Generative Output  │             │ • .CUBE 3D LUT Exporter       │
+│   & Interactive Judge Pins    │             │ • Photochemical Halation      │
+│ • Phase 2: Mood & Intent      │             │ • S-Curve Tone Mapping        │
+│ • Phase 3: Color Science      │             │ • 3-Way Split Toning Wheels   │
+│ • Phase 4: Field Guide &      │             │ • f/1.4 Optical Bokeh Blur    │
+│   Master Synthesis            │             │ • Virtual 3D Studio Light     │
+│ • Phase 5: Generative Output  │             │ • .XMP & .CUBE Pro Exporters  │
 └───────────────┬───────────────┘             └───────────────┬───────────────┘
                 │                                             │
                 ▼                                             ▼
 ┌───────────────────────────────┐             ┌───────────────────────────────┐
-│    Rate Limiter & Quota HUD   │             │  Client Storage & Offline SW  │
-│ (Sliding Window RPM / TPM)    │             │  (IndexedDB / idb-keyval)     │
+│  Multi-Engine 4K AI Upscaler  │             │  Client Storage & Offline SW  │
+├───────────────────────────────┤             ├───────────────────────────────┤
+│ • Truthful High-Pass (Local)  │             │ • IndexedDB (idb-keyval)      │
+│ • Neural Real-ESRGAN (Cloud)  │             │ • Encrypted LocalStorage      │
+│ • CodeFormer Face Restorer    │             │ • Service Worker Cache        │
 └───────────────────────────────┘             └───────────────────────────────┘
 ```
 
@@ -42,13 +47,13 @@ The analysis pipeline processes the uploaded photograph through 5 sequential rea
 [Raw Photo] ──► [Phase 1: Composition] ──► [Phase 2: Mood & Intent] ──► [Phase 3: Color Science] ──► [Phase 4: Synthesis] ──► [Phase 5: Output]
                        │                           │                           │                           │                         │
                        ▼                           ▼                           ▼                           ▼                         ▼
-                 Crop Bounds                 Genre & Mood                Kelvin, Tone &              Identity Lock &           Nano Banana /
+                 Crop & Pins                 Genre & Mood                Kelvin, Tone &              Field Guide &             Multi-Engine 4K /
                  Rule of 3rds               Lighting Critique            Grading Matrix              Master Prompt             Pro Darkroom
 ```
 
-### Phase 1: Composition & Spatial Geometry
+### Phase 1: Composition, Spatial Geometry & Judge Pins
 * **Framing Evaluation**: Evaluates edge margins, visual tension, and dead space.
-* **Focal Anchor Localization**: Identifies subject coordinate centers on normalized $0-1000$ coordinates.
+* **Interactive Hotspot Pins (`judgePins`)**: Normalized coordinates $(X, Y)$ identifying localized visual tensions with specific critique and applied fix explanations.
 * **Rule-of-Thirds Grid Alignment**: Identifies power intersection points and leading lines.
 * **Horizon Leveling**: Detects horizontal tilt angles with clockwise/counter-clockwise direction.
 * **Suggested Crop**: Normalized coordinates (`ymin`, `xmin`, `ymax`, `xmax`) with target aspect ratio ($16:9, 4:5, 1:1, 3:2$).
@@ -66,21 +71,25 @@ The analysis pipeline processes the uploaded photograph through 5 sequential rea
 * **Film Stock Emulation**: Selects the optimal photochemical analog match (*Kodak Portra 400, CineStill 800T, Fuji Velvia 50, Ilford HP5*).
 * **12-Parameter Numerical Matrix**: Exact numerical values for exposure, contrast, highlights, shadows, whites, blacks, temp, tint, vibrance, saturation, clarity, vignette, and grain.
 
-### Phase 4: Master Generative Synthesis
+### Phase 4: Master Generative Synthesis & Field Guide
 * **Executive Scorecard & Radar Profile**: Weighted composite score ($0-100$) across 5 dimensions.
+* **Pro Field Shooting Guide (`fieldGuide`)**: Recommended focal length, optimal time of day, shooting stance, and camera exposure triangle (Aperture, Shutter Speed, ISO).
 * **Subject Authenticity Lock**: Strict negative/positive directives to preserve facial geometry and subject identity.
 * **Optical Directives**: Lens focal length emulation ($35\text{mm}, 50\text{mm}, 85\text{mm} f/1.4$) and background bokeh separation.
 * **Master Prompt**: Complete 5-part descriptive prompt formatted for image transformation models.
 
 ### Phase 5: Dual Execution Paths
-1. **Nano Banana 2 Generative Model (`gemini-3.1-flash-image`)**: AI generative transformation with strict subject identity preservation.
-2. **Instant Pro Darkroom Studio (100% Client-Side & Free)**: Real-time 60fps in-browser execution with `.CUBE` 3D LUT export.
+1. **Multi-Engine 4K AI Super-Resolution Suite**:
+   * *Truthful High-Pass (100% In-Browser)*
+   * *Neural Real-ESRGAN (Free Cloud AI)*
+   * *CodeFormer Facial Restoration (Free Cloud AI)*
+2. **Instant Pro Darkroom Studio (100% Client-Side & Free)**: Real-time 60fps in-browser execution with `.XMP` and `.CUBE` export.
 
 ---
 
-## 3. Client-Side Performance & Rate Limiter
+## 3. Client-Side Performance & Privacy
 
 * **Token Pre-Scaling**: Client downscales uploaded high-megapixel photos to max $1280\text{px}$, reducing multimodal token usage and network payload by $>75\%$.
-* **Sliding-Window Rate Limiter**: Tracks request timestamps in a 60-second sliding window to guarantee adherence to Google AI Studio's 15 RPM / 1M TPM free limits.
-* **Zero-Quota UI Freeze Prevention**: Immediately detects permanent `limit: 0` responses without freezing browser threads with useless retry loops.
-* **State Persistence**: Uses IndexedDB (`idb-keyval`) to cache previous analyses by image SHA-256 hash, restoring active sessions automatically upon page reloads.
+* **Sliding-Window Rate Limiter**: Tracks request timestamps in a 60-second sliding window to guarantee adherence to Google AI Studio's free limits.
+* **Zero-Quota UI Freeze Prevention**: Automatically bypasses retry loops when `limit: 0` is detected.
+* **100% Client-Side Privacy**: API keys and uploaded photographs are stored exclusively in your browser's encrypted `localStorage` and IndexedDB cache.
