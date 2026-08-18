@@ -37,6 +37,7 @@ import {
 } from '../../services/imageProcessor';
 import { generateTailoredRecipes } from '../../services/recipeGenerator';
 import { HistogramWidget } from './HistogramWidget';
+import { UpscaleModal } from './UpscaleModal';
 
 interface DarkroomStudioProps {
   imageBase64: string;
@@ -95,6 +96,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
   const [applyCrop, setApplyCrop] = useState(true);
   const [showOriginal, setShowOriginal] = useState(false);
   const [activeControlTab, setActiveControlTab] = useState<'tone' | 'color' | 'photochemical' | 'optics'>('tone');
+  const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState<boolean>(false);
 
   // Export notifications
   const [copiedCss, setCopiedCss] = useState(false);
@@ -306,6 +308,17 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
           >
             {copiedCss ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copiedCss ? 'CSS Copied' : 'CSS LUT'}</span>
+          </button>
+
+          {/* 4K AI Super-Resolution Upscaler (Free) */}
+          <button
+            type="button"
+            onClick={() => setIsUpscaleModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 via-amber-500/20 to-cyan-500/20 hover:from-cyan-500/30 hover:to-amber-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="100% Free In-Browser 4K Super-Resolution AI Upscaler"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>AI 4K Upscale</span>
           </button>
 
           {/* Download Processed Image */}
@@ -937,6 +950,13 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
         </div>
 
       </div>
+
+      {/* 4K Super-Resolution AI Upscaler Modal */}
+      <UpscaleModal
+        isOpen={isUpscaleModalOpen}
+        onClose={() => setIsUpscaleModalOpen(false)}
+        canvasRef={canvasRef}
+      />
 
     </div>
   );

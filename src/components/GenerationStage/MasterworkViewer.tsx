@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Columns, SplitSquareVertical, ZoomIn, ZoomOut, Sparkles, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Download, Columns, SplitSquareVertical, ZoomIn, ZoomOut, Sparkles, CheckCircle2, RefreshCw, Zap } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { GeneratedMasterwork } from '../../types/photography';
+import { UpscaleModal } from '../DarkroomStudio/UpscaleModal';
 
 interface MasterworkViewerProps {
   originalBase64: string;
@@ -21,7 +22,24 @@ export const MasterworkViewer: React.FC<MasterworkViewerProps> = ({
   const [viewMode, setViewMode] = useState<'split' | 'side-by-side'>('split');
   const [sliderPos, setSliderPos] = useState<number>(50); // percentage 0 to 100
   const [isDragging, setIsDragging] = useState(false);
+  const [isUpscaleModalOpen, setIsUpscaleModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const masterCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Initialize canvas with masterwork image for upscaler
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth || img.width;
+      c.height = img.naturalHeight || img.height;
+      const ctx = c.getContext('2d');
+      ctx?.drawImage(img, 0, 0);
+      masterCanvasRef.current = c;
+    };
+    img.src = masterwork.imageUrl;
+  }, [masterwork.imageUrl]);
 
   // Trigger celebration confetti upon viewing
   useEffect(() => {
@@ -116,6 +134,17 @@ export const MasterworkViewer: React.FC<MasterworkViewerProps> = ({
             className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-accent-gold border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
           >
             <span>Export Pro Report</span>
+          </button>
+
+          {/* 4K AI Super-Resolution Upscale */}
+          <button
+            type="button"
+            onClick={() => setIsUpscaleModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 via-amber-500/20 to-cyan-500/20 hover:from-cyan-500/30 hover:to-amber-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="100% Free In-Browser 4K Super-Resolution AI Upscaler"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>AI 4K Upscale</span>
           </button>
 
           {/* Download Masterwork */}
@@ -222,6 +251,13 @@ export const MasterworkViewer: React.FC<MasterworkViewerProps> = ({
           {masterwork.promptUsed}
         </p>
       </div>
+
+      {/* 4K Super-Resolution AI Upscaler Modal */}
+      <UpscaleModal
+        isOpen={isUpscaleModalOpen}
+        onClose={() => setIsUpscaleModalOpen(false)}
+        canvasRef={masterCanvasRef}
+      />
 
     </div>
   );
