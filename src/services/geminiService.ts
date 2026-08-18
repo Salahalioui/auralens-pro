@@ -93,7 +93,18 @@ Carefully critique and analyze this photograph. Perform the 4-phase reasoning an
       "rationale": "<why this crop improves visual tension and balance>",
       "targetAspectRatio": "<e.g. 16:9, 4:5, 1:1, 3:2>"
     },
-    "clutterRemovalTips": ["<tip 1>", "<tip 2>"]
+    "clutterRemovalTips": ["<tip 1>", "<tip 2>"],
+    "judgePins": [
+      {
+        "id": "pin_1",
+        "x": <number 0-1000>,
+        "y": <number 0-1000>,
+        "type": "composition",
+        "label": "<short 2-word label>",
+        "critique": "<what visual tension exists here>",
+        "fixApplied": "<how this was corrected>"
+      }
+    ]
   },
   "phase2": {
     "score": <number 0-100>,
@@ -161,7 +172,18 @@ Carefully critique and analyze this photograph. Perform the 4-phase reasoning an
       "<Directive on lens focal length, creamy bokeh separation, optical clarity>"
     ],
     "masterPrompt": "<A comprehensive, highly descriptive 5-part prompt for Nano Banana image editing that preserves the subject identity while transforming lighting, color grading, background depth, and optical fidelity to award-winning caliber.>",
-    "recommendedAspectRatio": "<e.g. 16:9, 4:5, 3:2, 1:1>"
+    "recommendedAspectRatio": "<e.g. 16:9, 4:5, 3:2, 1:1>",
+    "fieldGuide": {
+      "recommendedLens": "<e.g. 85mm f/1.4 Prime>",
+      "idealTimeOfDay": "<e.g. Golden Hour (20m before sunset)>",
+      "physicalPositioning": "<e.g. Lower camera height by 30cm to create foreground depth>",
+      "suggestedSettings": {
+        "aperture": "<e.g. f/2.0>",
+        "shutterSpeed": "<e.g. 1/250s>",
+        "iso": "<e.g. ISO 100>"
+      },
+      "proTip": "<pro advice for capturing this genre in real life>"
+    }
   }
 }
 `;
@@ -614,6 +636,44 @@ export class GeminiService {
           'Crop distracting high-contrast elements near top-left edge',
           'Level the 1.8° clockwise horizon tilt to restore grounding equilibrium',
           'Dodge the foreground path to lead the viewer eye smoothly into the focal center'
+        ],
+        judgePins: [
+          {
+            id: 'pin_crop',
+            x: 120,
+            y: 110,
+            type: 'composition',
+            label: 'Edge Distraction',
+            critique: 'High-contrast perimeter clutter breaks subject isolation.',
+            fixApplied: 'Suggested Golden Ratio crop eliminates edge tangents.'
+          },
+          {
+            id: 'pin_horizon',
+            x: 500,
+            y: 430,
+            type: 'composition',
+            label: 'Horizon Tilt',
+            critique: '1.8° clockwise lean creates subliminal visual imbalance.',
+            fixApplied: 'Auto-leveling restores natural gravitational plane.'
+          },
+          {
+            id: 'pin_subject',
+            x: 480,
+            y: 520,
+            type: 'lighting',
+            label: 'Hero Subject',
+            critique: 'Flat ambient light hides fine textural detail in shadow zones.',
+            fixApplied: '+0.35 EV exposure lift and Zone-V contrast enhancement applied.'
+          },
+          {
+            id: 'pin_background',
+            x: 820,
+            y: 280,
+            type: 'sharpness',
+            label: 'Optical Depth',
+            critique: 'Deep depth of field competes with the subject.',
+            fixApplied: 'f/1.4 optical bokeh separation isolates subject.'
+          }
         ]
       },
       phase2: {
@@ -687,7 +747,18 @@ export class GeminiService {
           'Maintain ultra-crisp focal plane resolution across subject eyes and textural details.'
         ],
         masterPrompt: 'Transform this photograph into an award-winning gallery masterpiece. Strictly preserve the original subject identity, facial features, and authentic posture. Re-compose with clean golden ratio framing, eliminating edge distractions. Upgrade lighting to soft 45-degree golden hour directional illumination with subtle warm rim light. Apply Kodak Portra 400 film color science with deep rich blacks, luminous midtones, and delicate highlight roll-off. Render with 35mm f/1.4 medium format optical depth of field, creamy background bokeh separation, and crisp textural clarity on the focal plane.',
-        recommendedAspectRatio: '16:9'
+        recommendedAspectRatio: '16:9',
+        fieldGuide: {
+          recommendedLens: '85mm f/1.4 Medium-Format Prime',
+          idealTimeOfDay: 'Golden Hour (20–30 mins before sunset)',
+          physicalPositioning: 'Lower your camera axis by 30cm to introduce strong leading ground lines and isolate the subject against the sky.',
+          suggestedSettings: {
+            aperture: 'f/2.0 (Subject Isolation)',
+            shutterSpeed: '1/250s (Handheld Sharpness)',
+            iso: 'ISO 100 (Dynamic Range)'
+          },
+          proTip: 'Meter for the subject skin midtones and let the background highlights roll off naturally into soft golden hues.'
+        }
       }
     };
 

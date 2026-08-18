@@ -32,6 +32,16 @@ export interface SuggestedCrop {
   targetAspectRatio: string;
 }
 
+export interface JudgePin {
+  id: string;
+  x: number; // 0 to 1000 normalized
+  y: number; // 0 to 1000 normalized
+  type: 'composition' | 'lighting' | 'color' | 'sharpness';
+  label: string;
+  critique: string;
+  fixApplied: string;
+}
+
 export interface Phase1Composition {
   score: number; // 0-100
   framingCritique: string;
@@ -41,6 +51,7 @@ export interface Phase1Composition {
   horizonLevel: HorizonAnalysis;
   suggestedCrop: SuggestedCrop;
   clutterRemovalTips: string[];
+  judgePins?: JudgePin[];
 }
 
 export interface Phase2MoodAndStyle {
@@ -149,6 +160,33 @@ export interface StylePresetModifier {
   previewGradient: string;
 }
 
+export interface FieldShootingGuide {
+  recommendedLens: string;
+  idealTimeOfDay: string;
+  physicalPositioning: string;
+  suggestedSettings: {
+    aperture: string;
+    shutterSpeed: string;
+    iso: string;
+  };
+  proTip: string;
+}
+
+export interface OpticalBokehSettings {
+  enabled: boolean;
+  blurRadius: number;       // 0 to 30px
+  subjectFeather: number;   // 10 to 100
+}
+
+export interface RelightingSettings {
+  enabled: boolean;
+  lightX: number;           // 0 to 1000 normalized
+  lightY: number;           // 0 to 1000 normalized
+  intensity: number;        // 0 to 100
+  colorTemp: number;        // -50 to +50
+  radius: number;           // 20 to 100
+}
+
 export interface Phase4Synthesis {
   overallScore: number; // 0-100
   executiveSummary: string;
@@ -158,6 +196,7 @@ export interface Phase4Synthesis {
   lightingAndAtmosphereDirectives: string[];
   opticsAndBokehDirectives: string[];
   recommendedAspectRatio: string;
+  fieldGuide?: FieldShootingGuide;
 }
 
 export interface GeneratedMasterwork {

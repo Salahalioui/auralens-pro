@@ -8,14 +8,15 @@ import {
   Eye, 
   Sparkles, 
   ArrowLeft, 
-  Film, 
   Sun, 
   Palette, 
   Flame, 
   Crop,
-  Layers,
   FileCode,
-  CheckCircle2
+  CheckCircle2,
+  Camera,
+  Compass,
+  Zap
 } from 'lucide-react';
 import { 
   NumericalGrading, 
@@ -23,12 +24,15 @@ import {
   FullAnalysisResult, 
   SplitToningSettings, 
   TailoredGradingRecipe,
-  HistogramData 
+  HistogramData,
+  OpticalBokehSettings,
+  RelightingSettings
 } from '../../types/photography';
 import { 
   applyDarkroomGrading, 
   generateCssFilter, 
   generate3DCubeLUT,
+  generateLightroomXMP,
   computeHistogram 
 } from '../../services/imageProcessor';
 import { generateTailoredRecipes } from '../../services/recipeGenerator';
@@ -70,14 +74,32 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
   });
   const [halation, setHalation] = useState<number>(20);
   const [sCurveRollOff, setSCurveRollOff] = useState<number>(45);
-  
+
+  // Optical & 3D Relighting State
+  const [bokehSettings, setBokehSettings] = useState<OpticalBokehSettings>({
+    enabled: false,
+    blurRadius: 8,
+    subjectFeather: 40
+  });
+
+  const [relightingSettings, setRelightingSettings] = useState<RelightingSettings>({
+    enabled: false,
+    lightX: 300,
+    lightY: 250,
+    intensity: 35,
+    colorTemp: 25,
+    radius: 65
+  });
+
+  const [autoLevel, setAutoLevel] = useState<boolean>(false);
   const [applyCrop, setApplyCrop] = useState(true);
   const [showOriginal, setShowOriginal] = useState(false);
-  const [activeControlTab, setActiveControlTab] = useState<'tone' | 'color' | 'photochemical' | 'crop'>('tone');
+  const [activeControlTab, setActiveControlTab] = useState<'tone' | 'color' | 'photochemical' | 'optics'>('tone');
 
   // Export notifications
   const [copiedCss, setCopiedCss] = useState(false);
   const [downloadedLut, setDownloadedLut] = useState(false);
+  const [downloadedXmp, setDownloadedXmp] = useState(false);
 
   // Live Histogram state
   const [histogramData, setHistogramData] = useState<HistogramData>({
@@ -121,7 +143,10 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
         applyCrop ? suggestedCrop : null,
         splitToning,
         halation,
-        sCurveRollOff
+        sCurveRollOff,
+        bokehSettings,
+        relightingSettings,
+        autoLevel && analysis?.phase1?.horizonLevel?.tilted ? analysis.phase1.horizonLevel : null
       );
     }
 
@@ -132,7 +157,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
 
   useEffect(() => {
     render();
-  }, [grading, splitToning, halation, sCurveRollOff, applyCrop, showOriginal]);
+  }, [grading, splitToning, halation, sCurveRollOff, bokehSettings, relightingSettings, autoLevel, applyCrop, showOriginal]);
 
   // 1-Click Recipe Selection
   const handleSelectRecipe = (recipe: TailoredGradingRecipe) => {
@@ -176,6 +201,25 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
 
     setDownloadedLut(true);
     setTimeout(() => setDownloadedLut(false), 2500);
+  };
+
+  // Adobe Lightroom Preset (.XMP) Export
+  const handleExportLightroomXMP = () => {
+    const xmpData = generateLightroomXMP(
+      grading,
+      splitToning,
+      `AuraLens_${activeRecipeId}`
+    );
+    const blob = new Blob([xmpData], { type: 'application/rdf+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `AuraLens_${activeRecipeId}.xmp`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setDownloadedXmp(true);
+    setTimeout(() => setDownloadedXmp(false), 2500);
   };
 
   const handleCopyCss = () => {
@@ -230,6 +274,17 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Reset to AI Matrix</span>
+          </button>
+
+          {/* Export Adobe Lightroom .XMP */}
+          <button
+            type="button"
+            onClick={handleExportLightroomXMP}
+            className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold font-mono flex items-center gap-1.5 transition-all cursor-pointer"
+            title="Export Adobe Lightroom Classic & Mobile Preset (.XMP)"
+          >
+            {downloadedXmp ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Camera className="w-3.5 h-3.5" />}
+            <span>{downloadedXmp ? '.XMP Preset Downloaded' : 'Export .XMP (Lightroom)'}</span>
           </button>
 
           {/* Export .CUBE 3D LUT */}
@@ -324,7 +379,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
 
             {/* Hold to Compare floating pill */}
             <div className="absolute bottom-5 left-5 right-5 flex items-center justify-between bg-darkroom-950/85 backdrop-blur-md px-3.5 py-2 rounded-xl border border-slate-800 text-xs">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onMouseDown={() => setShowOriginal(true)}
@@ -349,6 +404,21 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   >
                     <Crop className="w-3.5 h-3.5" />
                     <span>{applyCrop ? `AI Crop (${suggestedCrop.targetAspectRatio || '16:9'})` : 'Original Frame'}</span>
+                  </button>
+                )}
+
+                {analysis?.phase1?.horizonLevel?.tilted && (
+                  <button
+                    type="button"
+                    onClick={() => setAutoLevel(!autoLevel)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      autoLevel
+                        ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>{autoLevel ? `Auto-Leveled (${analysis.phase1.horizonLevel.degrees}°)` : 'Level Horizon'}</span>
                   </button>
                 )}
               </div>
@@ -379,7 +449,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
               }`}
             >
               <Sun className="w-3.5 h-3.5" />
-              <span>Tone & DR</span>
+              <span>Tone</span>
             </button>
 
             <button
@@ -392,7 +462,7 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
               }`}
             >
               <Palette className="w-3.5 h-3.5" />
-              <span>Color Science</span>
+              <span>Color</span>
             </button>
 
             <button
@@ -405,7 +475,20 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
               }`}
             >
               <Flame className="w-3.5 h-3.5" />
-              <span>Photochemical</span>
+              <span>Emulsion</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveControlTab('optics')}
+              className={`flex-1 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeControlTab === 'optics'
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Optics & Light</span>
             </button>
           </div>
 
@@ -417,7 +500,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 <span>Primary Tone & Exposure Range</span>
               </h4>
 
-              {/* Exposure EV */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Exposure (EV)</span>
@@ -434,7 +516,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Contrast */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Contrast</span>
@@ -450,7 +531,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Highlights */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Highlights Recovery</span>
@@ -466,7 +546,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Shadows */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Shadows Lift</span>
@@ -482,7 +561,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Whites */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Whites Point</span>
@@ -498,7 +576,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Blacks */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Blacks Anchor</span>
@@ -524,7 +601,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 <span>White Balance & 3-Way Split Toning</span>
               </h4>
 
-              {/* Temperature */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Color Temperature</span>
@@ -540,7 +616,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Tint */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Tint (Green / Magenta)</span>
@@ -556,10 +631,9 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Vibrance */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Vibrance (Smart Saturation)</span>
+                  <span className="text-slate-300">Vibrance</span>
                   <span className="text-purple-300 font-bold">{grading.vibrance}</span>
                 </div>
                 <input
@@ -572,7 +646,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Saturation */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Overall Saturation</span>
@@ -588,13 +661,11 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Split Toning Controls */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <span className="text-[11px] font-mono text-cyan-400 font-bold block">
                   3-Way Split Toning Injection:
                 </span>
 
-                {/* Shadows Hue / Sat */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <span className="text-[10px] text-slate-400 font-mono">Shadows Hue ({splitToning.shadowsHue}°)</span>
@@ -620,7 +691,6 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   </div>
                 </div>
 
-                {/* Highlights Hue / Sat */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <span className="text-[10px] text-slate-400 font-mono">Highlights Hue ({splitToning.highlightsHue}°)</span>
@@ -654,10 +724,9 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
             <div className="darkroom-card p-5 border border-slate-800 space-y-4">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                 <Flame className="w-3.5 h-3.5 text-rose-400" />
-                <span>Photochemical Emulsion & Optics</span>
+                <span>Photochemical Emulsion & Halation</span>
               </h4>
 
-              {/* CineStill Halation Bloom */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">CineStill Photochemical Halation</span>
@@ -671,12 +740,8 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   onChange={(e) => setHalation(parseInt(e.target.value))}
                   className="w-full accent-rose-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
                 />
-                <p className="text-[10px] text-slate-500">
-                  Simulates red wavelength scattering across high-contrast borders and specular highlights.
-                </p>
               </div>
 
-              {/* S-Curve Highlight Roll-off */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">S-Curve Highlight Roll-off</span>
@@ -690,12 +755,8 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   onChange={(e) => setSCurveRollOff(parseInt(e.target.value))}
                   className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
                 />
-                <p className="text-[10px] text-slate-500">
-                  Compresses bright tones into soft photographic film curves without harsh clipping.
-                </p>
               </div>
 
-              {/* Film Grain */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Luminance-Adaptive Film Grain</span>
@@ -709,12 +770,8 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   onChange={(e) => updateParam('grain', parseInt(e.target.value))}
                   className="w-full accent-slate-300 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
                 />
-                <p className="text-[10px] text-slate-500">
-                  Zone V midtone-weighted silver halide noise structure.
-                </p>
               </div>
 
-              {/* Vignette */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
                   <span className="text-slate-300">Lens Vignette Falloff</span>
@@ -730,10 +787,9 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                 />
               </div>
 
-              {/* Clarity */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Micro-Contrast & Texture Clarity</span>
+                  <span className="text-slate-300">Micro-Contrast Clarity</span>
                   <span className="text-cyan-400 font-bold">{grading.clarity}</span>
                 </div>
                 <input
@@ -744,6 +800,136 @@ export const DarkroomStudio: React.FC<DarkroomStudioProps> = ({
                   onChange={(e) => updateParam('clarity', parseInt(e.target.value))}
                   className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
                 />
+              </div>
+            </div>
+          )}
+
+          {/* Tab 4: Computational Optics & 3D Relighting [NEW] */}
+          {activeControlTab === 'optics' && (
+            <div className="darkroom-card p-5 border border-slate-800 space-y-5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Computational Optics & 3D Relighting</span>
+              </h4>
+
+              {/* Section 1: f/1.4 Bokeh Simulator */}
+              <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-accent-gold" />
+                    <span className="font-bold text-slate-200 text-xs">f/1.4 Prime Bokeh Simulator</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBokehSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                      bokehSettings.enabled
+                        ? 'bg-amber-500/20 text-accent-gold border border-amber-500/40'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {bokehSettings.enabled ? 'ACTIVE' : 'OFF'}
+                  </button>
+                </div>
+
+                {bokehSettings.enabled && (
+                  <div className="space-y-3 pt-2">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Background Optical Blur</span>
+                        <span className="text-accent-gold font-bold">{bokehSettings.blurRadius}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="2"
+                        max="24"
+                        value={bokehSettings.blurRadius}
+                        onChange={(e) => setBokehSettings(prev => ({ ...prev, blurRadius: parseInt(e.target.value) }))}
+                        className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Section 2: Virtual 3D Studio Relighting */}
+              <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sun className="w-4 h-4 text-yellow-400" />
+                    <span className="font-bold text-slate-200 text-xs">Virtual 3D Key Light Sculptor</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRelightingSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                      relightingSettings.enabled
+                        ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {relightingSettings.enabled ? 'ACTIVE' : 'OFF'}
+                  </button>
+                </div>
+
+                {relightingSettings.enabled && (
+                  <div className="space-y-3 pt-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-mono">Light X Position</span>
+                        <input
+                          type="range"
+                          min="50"
+                          max="950"
+                          value={relightingSettings.lightX}
+                          onChange={(e) => setRelightingSettings(prev => ({ ...prev, lightX: parseInt(e.target.value) }))}
+                          className="w-full accent-yellow-400 h-1.5 bg-slate-800 rounded cursor-pointer"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-mono">Light Y Position</span>
+                        <input
+                          type="range"
+                          min="50"
+                          max="950"
+                          value={relightingSettings.lightY}
+                          onChange={(e) => setRelightingSettings(prev => ({ ...prev, lightY: parseInt(e.target.value) }))}
+                          className="w-full accent-yellow-400 h-1.5 bg-slate-800 rounded cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Light Intensity</span>
+                        <span className="text-yellow-300 font-bold">{relightingSettings.intensity}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="5"
+                        max="80"
+                        value={relightingSettings.intensity}
+                        onChange={(e) => setRelightingSettings(prev => ({ ...prev, intensity: parseInt(e.target.value) }))}
+                        className="w-full accent-yellow-400 h-1.5 bg-slate-800 rounded cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-mono">
+                        <span className="text-slate-400">Color Temperature</span>
+                        <span className="text-amber-400 font-bold">{relightingSettings.colorTemp > 0 ? `+${relightingSettings.colorTemp} (Warm)` : `${relightingSettings.colorTemp} (Cool)`}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-50"
+                        max="50"
+                        value={relightingSettings.colorTemp}
+                        onChange={(e) => setRelightingSettings(prev => ({ ...prev, colorTemp: parseInt(e.target.value) }))}
+                        className="w-full accent-amber-500 h-1.5 bg-gradient-to-r from-cyan-500 to-amber-500 rounded cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

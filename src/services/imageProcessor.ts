@@ -3,7 +3,10 @@ import {
   PhotoMetadata, 
   SuggestedCrop, 
   SplitToningSettings, 
-  HistogramData 
+  HistogramData,
+  OpticalBokehSettings,
+  RelightingSettings,
+  HorizonAnalysis
 } from '../types/photography';
 
 export interface PreprocessedImageResult {
@@ -116,7 +119,6 @@ function hslToRgbDelta(hue: number, sat: number): { r: number; g: number; b: num
   else if (h >= 4 && h < 5) { r = x; g = 0; b = c; }
   else { r = c; g = 0; b = x; }
 
-  // Convert to zero-centered delta (-1 to +1)
   return {
     r: (r - 0.5 * sat) * 255,
     g: (g - 0.5 * sat) * 255,
@@ -134,7 +136,10 @@ export function applyDarkroomGrading(
   crop?: SuggestedCrop | null,
   splitToning?: SplitToningSettings | null,
   halation = 0,
-  sCurveRollOff = 40
+  sCurveRollOff = 40,
+  bokehSettings?: OpticalBokehSettings | null,
+  relightingSettings?: RelightingSettings | null,
+  horizonCorrection?: HorizonAnalysis | null
 ): void {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
@@ -163,10 +168,31 @@ export function applyDarkroomGrading(
   canvas.width = Math.max(10, Math.round(sWidth));
   canvas.height = Math.max(10, Math.round(sHeight));
 
-  // Draw base cropped image
-  ctx.drawImage(imageElement, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+  // --- Auto-Leveling Horizon Affine Rotation ---
+  if (horizonCorrection && horizonCorrection.tilted && horizonCorrection.degrees > 0) {
+    const angleRad = (horizonCorrection.degrees * Math.PI) / 180;
+    const rotation = horizonCorrection.direction === 'clockwise' ? -angleRad : angleRad;
 
-  // Get pixel buffer
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(rotation);
+    ctx.drawImage(
+      imageElement,
+      sx, sy, sWidth, sHeight,
+      -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height
+    );
+    ctx.restore();
+  } else {
+    // Draw base cropped image directly
+    ctx.drawImage(imageElement, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+  }
+
+  // --- Computational f/1.4 Optical Depth & Bokeh Simulation ---
+  if (bokehSettings && bokehSettings.enabled && bokehSettings.blurRadius > 0) {
+    applyOpticalBokeh(canvas, crop, bokehSettings);
+  }
+
+  // Get pixel buffer for pixel manipulation
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
   const len = data.length;
@@ -210,6 +236,7 @@ export function applyDarkroomGrading(
 
   // 7. S-Curve Roll-off Factor (0 to 1)
   const rollOffStrength = (sCurveRollOff / 100) * 0.6;
+  const sCurve = (t: number) => t * t * (3 - 2 * t);
 
   // Pixel transformation loop
   for (let i = 0; i < len; i += 4) {
@@ -217,12 +244,12 @@ export function applyDarkroomGrading(
     let g = data[i + 1];
     let b = data[i + 2];
 
-    // --- Exposure ---
+    // Exposure
     r *= evMult;
     g *= evMult;
     b *= evMult;
 
-    // --- Whites & Blacks Anchor ---
+    // Whites & Blacks Anchor
     if (whitesAdj !== 0) {
       r += whitesAdj * (r / 255);
       g += whitesAdj * (g / 255);
@@ -235,7 +262,7 @@ export function applyDarkroomGrading(
       b += blacksAdj * bWeight;
     }
 
-    // --- Dynamic Range (Shadow Lift & Highlight Compression) ---
+    // Dynamic Range (Shadow Lift & Highlight Compression)
     const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
     if (lum < 128) {
@@ -252,33 +279,30 @@ export function applyDarkroomGrading(
       b += comp;
     }
 
-    // --- Parametric S-Curve Tone Mapping (Highlight Roll-off) ---
+    // Parametric S-Curve Tone Mapping (Highlight Roll-off)
     if (rollOffStrength > 0) {
-      // Soft compressive roll-off curve
       const normR = Math.max(0, Math.min(1, r / 255));
       const normG = Math.max(0, Math.min(1, g / 255));
       const normB = Math.max(0, Math.min(1, b / 255));
 
-      // Cubic hermite smooth roll-off
-      const sCurve = (t: number) => t * t * (3 - 2 * t);
       r = (normR * (1 - rollOffStrength) + sCurve(normR) * rollOffStrength) * 255;
       g = (normG * (1 - rollOffStrength) + sCurve(normG) * rollOffStrength) * 255;
       b = (normB * (1 - rollOffStrength) + sCurve(normB) * rollOffStrength) * 255;
     }
 
-    // --- Contrast ---
+    // Contrast
     if (contrastVal !== 0) {
       r = contrastFactor * (r - 128) + 128;
       g = contrastFactor * (g - 128) + 128;
       b = contrastFactor * (b - 128) + 128;
     }
 
-    // --- White Balance Temperature & Tint ---
+    // White Balance Temperature & Tint
     r += tempShiftR + tintShiftR;
     g += tintShiftG;
     b += tempShiftB + tintShiftB;
 
-    // --- Split Toning (Lift, Gamma, Gain) ---
+    // Split Toning
     if (hasSplitToning) {
       const curLuma = 0.299 * r + 0.587 * g + 0.114 * b;
       if (curLuma < splitMidpoint) {
@@ -294,7 +318,7 @@ export function applyDarkroomGrading(
       }
     }
 
-    // --- Saturation / Vibrance / Monochrome ---
+    // Saturation / Vibrance / Monochrome
     const gray = 0.299 * r + 0.587 * g + 0.114 * b;
     if (isMonochrome) {
       r = gray;
@@ -319,6 +343,11 @@ export function applyDarkroomGrading(
   // Put base graded pixels back
   ctx.putImageData(imgData, 0, 0);
 
+  // --- Virtual 3D Studio Relighting Engine ---
+  if (relightingSettings && relightingSettings.enabled) {
+    applyVirtualRelighting(canvas, relightingSettings);
+  }
+
   // --- Photochemical Halation & Specular Bloom Simulation ---
   if (halation > 0) {
     const halationCanvas = document.createElement('canvas');
@@ -327,7 +356,6 @@ export function applyDarkroomGrading(
     const hCtx = halationCanvas.getContext('2d');
 
     if (hCtx) {
-      // Extract specular highlight mask
       const hImgData = hCtx.createImageData(canvas.width, canvas.height);
       const hData = hImgData.data;
       const threshold = 185;
@@ -337,7 +365,7 @@ export function applyDarkroomGrading(
         const l = 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
         if (l > threshold) {
           const factor = (l - threshold) / (255 - threshold);
-          hData[k] = 255 * factor;     // Warm Red halation wavelength
+          hData[k] = 255 * factor;     // Warm Red
           hData[k + 1] = 60 * factor;  // Slight orange
           hData[k + 2] = 20 * factor;  // Low blue
           hData[k + 3] = 255 * factor * halationIntensity;
@@ -345,7 +373,6 @@ export function applyDarkroomGrading(
       }
       hCtx.putImageData(hImgData, 0, 0);
 
-      // Blur the halation mask for photochemical light bleeding
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
       ctx.filter = `blur(${Math.max(4, Math.round(canvas.width * 0.012))}px)`;
@@ -382,7 +409,6 @@ export function applyDarkroomGrading(
       const grainAmount = (grading.grain / 100) * 40;
 
       for (let j = 0; j < grainData.length; j += 4) {
-        // Luminance-weighted bell curve: grain is thickest in Zone V midtones
         const baseLuma = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
         const midtoneWeight = Math.max(0.2, 1 - Math.abs(baseLuma - 128) / 128);
 
@@ -400,6 +426,110 @@ export function applyDarkroomGrading(
       ctx.restore();
     }
   }
+}
+
+/**
+ * Computational f/1.4 Optical Depth-of-Field & Bokeh Simulation
+ */
+export function applyOpticalBokeh(
+  canvas: HTMLCanvasElement,
+  crop?: SuggestedCrop | null,
+  settings: OpticalBokehSettings = { enabled: true, blurRadius: 10, subjectFeather: 40 }
+): void {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx || settings.blurRadius <= 0) return;
+
+  // Create an offscreen blurred background copy
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = canvas.width;
+  bgCanvas.height = canvas.height;
+  const bgCtx = bgCanvas.getContext('2d');
+  if (!bgCtx) return;
+
+  // Draw current canvas with optical Gaussian bokeh blur filter
+  bgCtx.filter = `blur(${Math.max(2, settings.blurRadius)}px)`;
+  bgCtx.drawImage(canvas, 0, 0);
+
+  // Create subject focal anchor mask
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = canvas.width;
+  maskCanvas.height = canvas.height;
+  const maskCtx = maskCanvas.getContext('2d');
+  if (!maskCtx) return;
+
+  const focalX = canvas.width * 0.5;
+  const focalY = canvas.height * 0.52;
+  const radiusX = canvas.width * 0.32;
+  const radiusY = canvas.height * 0.38;
+
+  // Elliptical radial gradient mask (subject center is opaque, background is transparent)
+  const grad = maskCtx.createRadialGradient(
+    focalX, focalY, Math.min(radiusX, radiusY) * 0.25,
+    focalX, focalY, Math.max(radiusX, radiusY)
+  );
+  grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+  grad.addColorStop(0.65, 'rgba(0, 0, 0, 0.8)');
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+  maskCtx.fillStyle = grad;
+  maskCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Composite: Background is blurred, subject layer is masked and drawn sharp on top
+  const sharpCanvas = document.createElement('canvas');
+  sharpCanvas.width = canvas.width;
+  sharpCanvas.height = canvas.height;
+  const sharpCtx = sharpCanvas.getContext('2d');
+  if (!sharpCtx) return;
+
+  sharpCtx.drawImage(canvas, 0, 0);
+  sharpCtx.globalCompositeOperation = 'destination-in';
+  sharpCtx.drawImage(maskCanvas, 0, 0);
+
+  // Final draw: Clear canvas, draw blurred background, then sharp subject on top
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.drawImage(sharpCanvas, 0, 0);
+}
+
+/**
+ * Virtual 3D Studio Relighting Engine
+ */
+export function applyVirtualRelighting(
+  canvas: HTMLCanvasElement,
+  settings: RelightingSettings
+): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !settings.enabled || settings.intensity <= 0) return;
+
+  const lightX = (settings.lightX / 1000) * canvas.width;
+  const lightY = (settings.lightY / 1000) * canvas.height;
+  const maxRadius = Math.max(canvas.width, canvas.height) * ((settings.radius || 60) / 100);
+
+  const grad = ctx.createRadialGradient(
+    lightX, lightY, 0,
+    lightX, lightY, maxRadius
+  );
+
+  const alpha = (settings.intensity / 100) * 0.55;
+  const temp = settings.colorTemp || 20;
+
+  // Temperature coloration
+  let colorCenter = `rgba(255, 240, 200, ${alpha})`;
+  if (temp > 0) {
+    colorCenter = `rgba(255, ${Math.round(220 - temp)}, ${Math.round(180 - temp * 1.5)}, ${alpha})`;
+  } else if (temp < 0) {
+    colorCenter = `rgba(${Math.round(200 + temp)}, ${Math.round(230 + temp * 0.5)}, 255, ${alpha})`;
+  }
+
+  grad.addColorStop(0, colorCenter);
+  grad.addColorStop(0.5, `rgba(255, 255, 255, ${alpha * 0.4})`);
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
 }
 
 /**
@@ -471,11 +601,11 @@ export function generate3DCubeLUT(
 ): string {
   const lines: string[] = [];
   lines.push('# AuraLens Pro — AI Studio 3D LUT');
-  lines.push(`# Generated with Gemini Vision Color Science Matrix`);
-  lines.push(`TITLE "AuraLens_AI_MasterGrade"`);
+  lines.push('# Generated with Gemini Vision Color Science Matrix');
+  lines.push('TITLE "AuraLens_AI_MasterGrade"');
   lines.push(`LUT_3D_SIZE ${lutSize}`);
-  lines.push(`DOMAIN_MIN 0.0 0.0 0.0`);
-  lines.push(`DOMAIN_MAX 1.0 1.0 1.0`);
+  lines.push('DOMAIN_MIN 0.0 0.0 0.0');
+  lines.push('DOMAIN_MAX 1.0 1.0 1.0');
   lines.push('');
 
   const evMult = Math.pow(2, (grading.exposureEV || 0) * 0.85);
@@ -489,7 +619,6 @@ export function generate3DCubeLUT(
   const rollOffStrength = (sCurveRollOff / 100) * 0.6;
   const sCurve = (t: number) => t * t * (3 - 2 * t);
 
-  // Iterate 3D color cube (Blue outer, Green mid, Red inner)
   for (let bIdx = 0; bIdx < lutSize; bIdx++) {
     for (let gIdx = 0; gIdx < lutSize; gIdx++) {
       for (let rIdx = 0; rIdx < lutSize; rIdx++) {
@@ -497,12 +626,10 @@ export function generate3DCubeLUT(
         let g = gIdx / (lutSize - 1);
         let b = bIdx / (lutSize - 1);
 
-        // Exposure
         r *= evMult;
         g *= evMult;
         b *= evMult;
 
-        // Dynamic Range Highlights & Shadows
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         if (lum < 0.5) {
           const sWeight = (0.5 - lum) / 0.5;
@@ -514,7 +641,6 @@ export function generate3DCubeLUT(
           r += comp; g += comp; b += comp;
         }
 
-        // S-Curve roll-off
         if (rollOffStrength > 0) {
           const nR = Math.max(0, Math.min(1, r));
           const nG = Math.max(0, Math.min(1, g));
@@ -524,19 +650,16 @@ export function generate3DCubeLUT(
           b = nB * (1 - rollOffStrength) + sCurve(nB) * rollOffStrength;
         }
 
-        // Contrast
         if (contrastVal !== 0) {
           r = (contrastFactor * (r * 255 - 128) + 128) / 255;
           g = (contrastFactor * (g * 255 - 128) + 128) / 255;
           b = (contrastFactor * (b * 255 - 128) + 128) / 255;
         }
 
-        // Temperature & Tint
         r += tempShiftR;
         g += tintShiftG;
         b += tempShiftB;
 
-        // Saturation / Monochrome
         const gray = 0.299 * r + 0.587 * g + 0.114 * b;
         if (isMonochrome) {
           r = gray; g = gray; b = gray;
@@ -546,7 +669,6 @@ export function generate3DCubeLUT(
           b = gray + (b - gray) * satMult;
         }
 
-        // Clamp 0.0 to 1.0 with 6 decimal precision
         const outR = Math.max(0, Math.min(1, r)).toFixed(6);
         const outG = Math.max(0, Math.min(1, g)).toFixed(6);
         const outB = Math.max(0, Math.min(1, b)).toFixed(6);
@@ -557,6 +679,54 @@ export function generate3DCubeLUT(
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Generates an Industry-Standard Adobe Lightroom Preset (.XMP) XML sidecar file
+ */
+export function generateLightroomXMP(
+  grading: NumericalGrading,
+  splitToning?: SplitToningSettings | null,
+  presetName = 'AuraLens_AI_Master'
+): string {
+  return `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000 1.000000, 0000/00/00-00:00:00">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    crs:PresetType="Normal"
+    crs:Cluster=""
+    crs:UUID="${Math.random().toString(36).substring(2, 15)}"
+    crs:SupportsAmount2="True"
+    crs:SupportsAmount="True"
+    crs:ProcessVersion="15.4"
+    crs:Exposure2012="${(grading.exposureEV || 0).toFixed(2)}"
+    crs:Contrast2012="${Math.round(grading.contrast || 0)}"
+    crs:Highlights2012="${Math.round(grading.highlights || 0)}"
+    crs:Shadows2012="${Math.round(grading.shadows || 0)}"
+    crs:Whites2012="${Math.round(grading.whites || 0)}"
+    crs:Blacks2012="${Math.round(grading.blacks || 0)}"
+    crs:Clarity2012="${Math.round(grading.clarity || 0)}"
+    crs:Vibrance="${Math.round(grading.vibrance || 0)}"
+    crs:Saturation="${Math.round(grading.saturation || 0)}"
+    crs:Temperature="${Math.round(grading.temperature || 0)}"
+    crs:Tint="${Math.round(grading.tint || 0)}"
+    crs:PostCropVignetteAmount="${-(grading.vignette || 0)}"
+    crs:GrainAmount="${Math.round(grading.grain || 0)}"
+    crs:SplitToningShadowHue="${splitToning?.shadowsHue || 0}"
+    crs:SplitToningShadowSaturation="${splitToning?.shadowsSat || 0}"
+    crs:SplitToningHighlightHue="${splitToning?.highlightsHue || 0}"
+    crs:SplitToningHighlightSaturation="${splitToning?.highlightsSat || 0}"
+    crs:SplitToningBalance="${splitToning?.balance || 0}">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">${presetName}</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
 }
 
 /**

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sparkles, Copy, Check, Wand2, Sliders, ShieldCheck, Camera } from 'lucide-react';
 import { Phase4Synthesis, StylePresetModifier } from '../../types/photography';
 import { STYLE_PRESETS } from '../../services/geminiService';
+import { FieldGuideCard } from './FieldGuideCard';
 
 interface SynthesisTabProps {
   synthesis: Phase4Synthesis;
@@ -57,6 +58,11 @@ export const SynthesisTab: React.FC<SynthesisTabProps> = ({
   return (
     <div className="space-y-6">
       
+      {/* Pro Field Shooting Guide */}
+      {synthesis?.fieldGuide && (
+        <FieldGuideCard guide={synthesis.fieldGuide} />
+      )}
+
       {/* Top Header & Dual Engines Banner */}
       <div className="darkroom-card p-6 border border-slate-800 space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
