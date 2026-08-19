@@ -120,6 +120,29 @@ export interface SplitToningSettings {
   balance: number;           // -100 (more shadows) to +100 (more highlights)
 }
 
+export type HslChannel = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'magenta';
+
+export interface HslChannelShift {
+  hue: number;        // -50 to +50 deg shift
+  saturation: number; // -100 to +100 %
+  luminance: number;  // -100 to +100 %
+}
+
+export type HslSettings = Record<HslChannel, HslChannelShift>;
+
+export type ComparisonMode = 'graded' | 'split-slider' | 'side-by-side' | 'hold-original';
+
+export interface SnapshotSlot {
+  id: 'A' | 'B';
+  name: string;
+  timestamp: number;
+  grading: NumericalGrading;
+  splitToning: SplitToningSettings;
+  halation: number;
+  sCurveRollOff: number;
+  hslSettings?: HslSettings;
+}
+
 export interface TailoredGradingRecipe {
   id: string;
   name: string;

@@ -3,10 +3,12 @@ import {
   PhotoMetadata, 
   SuggestedCrop, 
   SplitToningSettings, 
-  HistogramData,
-  OpticalBokehSettings,
-  RelightingSettings,
-  HorizonAnalysis
+  HistogramData, 
+  OpticalBokehSettings, 
+  RelightingSettings, 
+  HorizonAnalysis,
+  HslSettings,
+  HslChannel
 } from '../types/photography';
 
 export interface PreprocessedImageResult {
@@ -126,6 +128,159 @@ function hslToRgbDelta(hue: number, sat: number): { r: number; g: number; b: num
   };
 }
 
+export const DEFAULT_HSL_SETTINGS: HslSettings = {
+  red: { hue: 0, saturation: 0, luminance: 0 },
+  orange: { hue: 0, saturation: 0, luminance: 0 },
+  yellow: { hue: 0, saturation: 0, luminance: 0 },
+  green: { hue: 0, saturation: 0, luminance: 0 },
+  cyan: { hue: 0, saturation: 0, luminance: 0 },
+  blue: { hue: 0, saturation: 0, luminance: 0 },
+  purple: { hue: 0, saturation: 0, luminance: 0 },
+  magenta: { hue: 0, saturation: 0, luminance: 0 }
+};
+
+export const HSL_CHANNELS: { id: HslChannel; name: string; color: string; centerHue: number }[] = [
+  { id: 'red', name: 'Red', color: '#ef4444', centerHue: 0 },
+  { id: 'orange', name: 'Orange', color: '#f97316', centerHue: 30 },
+  { id: 'yellow', name: 'Yellow', color: '#eab308', centerHue: 60 },
+  { id: 'green', name: 'Green', color: '#22c55e', centerHue: 120 },
+  { id: 'cyan', name: 'Cyan', color: '#06b6d4', centerHue: 180 },
+  { id: 'blue', name: 'Blue', color: '#3b82f6', centerHue: 240 },
+  { id: 'purple', name: 'Purple', color: '#a855f7', centerHue: 280 },
+  { id: 'magenta', name: 'Magenta', color: '#ec4899', centerHue: 320 }
+];
+
+export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h *= 60;
+  }
+  return [h, s, l];
+}
+
+export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+
+  if (0 <= h && h < 60) { r = c; g = x; b = 0; }
+  else if (60 <= h && h < 120) { r = x; g = c; b = 0; }
+  else if (120 <= h && h < 180) { r = 0; g = c; b = x; }
+  else if (180 <= h && h < 240) { r = 0; g = x; b = c; }
+  else if (240 <= h && h < 300) { r = x; g = 0; b = c; }
+  else if (300 <= h && h < 360) { r = c; g = 0; b = x; }
+
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255)
+  ];
+}
+
+/**
+ * 1-Click Neural Auto-Tone Enhancer
+ * Dynamically balances dynamic range, recovers clipped highlights/shadows, and anchors Zone V midtones
+ */
+export function autoBalanceGrading(histogram: HistogramData, currentGrading: NumericalGrading): NumericalGrading {
+  let newGrading = { ...currentGrading };
+
+  // 1. Shadow Clipping Recovery
+  if (histogram.clippedShadowsPercent > 2.0) {
+    newGrading.shadows = Math.min(65, (newGrading.shadows || 0) + 25);
+    newGrading.blacks = Math.min(40, (newGrading.blacks || 0) + 15);
+  } else if (histogram.clippedShadowsPercent < 0.1) {
+    newGrading.blacks = Math.max(-20, (newGrading.blacks || 0) - 10);
+  }
+
+  // 2. Highlight Clipping Recovery
+  if (histogram.clippedHighlightsPercent > 1.5) {
+    newGrading.highlights = Math.max(-60, (newGrading.highlights || 0) - 30);
+    newGrading.whites = Math.max(-30, (newGrading.whites || 0) - 15);
+  }
+
+  // 3. Contrast & Dynamic Range Optimization
+  newGrading.contrast = Math.max(10, Math.min(35, (newGrading.contrast || 0) + 10));
+  newGrading.clarity = Math.max(15, Math.min(40, (newGrading.clarity || 0) + 10));
+  newGrading.vibrance = Math.max(10, Math.min(30, (newGrading.vibrance || 0) + 8));
+
+  return newGrading;
+}
+
+/**
+ * Draws a live interactive split-screen wipe comparison between graded output and original RAW
+ */
+export function applySplitScreenComparison(
+  canvas: HTMLCanvasElement,
+  imageElement: HTMLImageElement,
+  crop?: SuggestedCrop | null,
+  splitPercent = 50
+): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const splitX = Math.round((canvas.width * splitPercent) / 100);
+
+  const srcWidth = imageElement.naturalWidth || imageElement.width;
+  const srcHeight = imageElement.naturalHeight || imageElement.height;
+
+  let sx = 0, sy = 0, sWidth = srcWidth, sHeight = srcHeight;
+  if (crop && crop.xmin !== undefined && crop.xmax !== undefined) {
+    const xmin = Number(crop.xmin) || 0;
+    const ymin = Number(crop.ymin) || 0;
+    const xmax = Number(crop.xmax) || 1000;
+    const ymax = Number(crop.ymax) || 1000;
+    sx = Math.max(0, (xmin / 1000) * srcWidth);
+    sy = Math.max(0, (ymin / 1000) * srcHeight);
+    sWidth = Math.min(srcWidth - sx, ((xmax - xmin) / 1000) * srcWidth);
+    sHeight = Math.min(srcHeight - sy, ((ymax - ymin) / 1000) * srcHeight);
+  }
+
+  // Draw original image on the right side of the split line
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(splitX, 0, canvas.width - splitX, canvas.height);
+  ctx.clip();
+  ctx.drawImage(imageElement, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Draw vertical split dividing line with glowing shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+  ctx.shadowBlur = 6;
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#f59e0b'; // Accent Gold
+  ctx.beginPath();
+  ctx.moveTo(splitX, 0);
+  ctx.lineTo(splitX, canvas.height);
+  ctx.stroke();
+
+  // Draw split handle circle in the vertical center
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(splitX, canvas.height / 2, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VS', splitX, canvas.height / 2);
+  ctx.restore();
+}
+
 /**
  * Studio-Grade Computational Color Science Engine
  */
@@ -139,7 +294,8 @@ export function applyDarkroomGrading(
   sCurveRollOff = 40,
   bokehSettings?: OpticalBokehSettings | null,
   relightingSettings?: RelightingSettings | null,
-  horizonCorrection?: HorizonAnalysis | null
+  horizonCorrection?: HorizonAnalysis | null,
+  hslSettings?: HslSettings | null
 ): void {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
@@ -238,6 +394,18 @@ export function applyDarkroomGrading(
   const rollOffStrength = (sCurveRollOff / 100) * 0.6;
   const sCurve = (t: number) => t * t * (3 - 2 * t);
 
+  // 8. 8-Channel Selective HSL Active Check
+  let hasHslShift = false;
+  if (hslSettings && !isMonochrome) {
+    for (const ch of HSL_CHANNELS) {
+      const shift = hslSettings[ch.id];
+      if (shift && (shift.hue !== 0 || shift.saturation !== 0 || shift.luminance !== 0)) {
+        hasHslShift = true;
+        break;
+      }
+    }
+  }
+
   // Pixel transformation loop
   for (let i = 0; i < len; i += 4) {
     let r = data[i];
@@ -332,6 +500,40 @@ export function applyDarkroomGrading(
       r = gray + (r - gray) * totalSatMult;
       g = gray + (g - gray) * totalSatMult;
       b = gray + (b - gray) * totalSatMult;
+
+      // 8-Channel Selective HSL Mixer
+      if (hasHslShift && hslSettings) {
+        const [curH, curS, curL] = rgbToHsl(r, g, b);
+        let dH = 0;
+        let dS = 0;
+        let dL = 0;
+
+        for (let c = 0; c < HSL_CHANNELS.length; c++) {
+          const ch = HSL_CHANNELS[c];
+          const shift = hslSettings[ch.id];
+          if (!shift || (shift.hue === 0 && shift.saturation === 0 && shift.luminance === 0)) continue;
+
+          let diff = Math.abs(curH - ch.centerHue);
+          if (diff > 180) diff = 360 - diff;
+
+          if (diff < 40) {
+            const weight = Math.cos((diff / 40) * (Math.PI / 2)) ** 2;
+            dH += shift.hue * weight;
+            dS += shift.saturation * weight;
+            dL += shift.luminance * weight;
+          }
+        }
+
+        if (dH !== 0 || dS !== 0 || dL !== 0) {
+          const finalH = (curH + dH + 360) % 360;
+          const finalS = Math.max(0, Math.min(1, curS * (1 + dS / 100)));
+          const finalL = Math.max(0, Math.min(1, curL * (1 + dL / 100)));
+          const [nr, ng, nb] = hslToRgb(finalH, finalS, finalL);
+          r = nr;
+          g = ng;
+          b = nb;
+        }
+      }
     }
 
     // Clamp values
